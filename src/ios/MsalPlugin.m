@@ -301,6 +301,37 @@
     }
 }
 
+- (UIViewController *)topMostViewController
+{
+    UIViewController *topController = nil;
+
+    // For iOS/iPadOS 15+ with scenes
+    if (@available(iOS 15.0, *)) {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                for (UIWindow *window in windowScene.windows) {
+                    if (window.isKeyWindow) {
+                        topController = window.rootViewController;
+                        break;
+                    }
+                }
+                if (topController) break;
+            }
+        }
+    }
+
+    if (!topController) {
+        topController = [self viewController];
+    }
+
+    while (topController.presentedViewController) {
+        topController = topController.presentedViewController;
+    }
+
+    return topController;
+}
+
 - (void)signInInteractive:(CDVInvokedUrlCommand*)command
 {
     if (!self.isInit)
@@ -311,53 +342,71 @@
     else
     {
         dispatch_async(dispatch_get_main_queue(), ^{
-            MSALWebviewParameters *webParameters = [[MSALWebviewParameters alloc] initWithAuthPresentationViewController:[self viewController]];
+            UIViewController *presentingVC = [self topMostViewController];
+
+            if (!presentingVC || !presentingVC.view.window) {
+                CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"No valid view controller available for presentation. The app may not be in the foreground."];
+                [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+                return;
+            }
+
+            MSALWebviewParameters *webParameters = [[MSALWebviewParameters alloc] initWithAuthPresentationViewController:presentingVC];
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 130000
+            webParameters.prefersEphemeralWebBrowserSession = NO;
+#endif
 
             NSString *loginHint = (NSString *)[command.arguments objectAtIndex:0];
             NSString *prompt = (NSString *)[command.arguments objectAtIndex:1];
             NSString *webViewType = (NSString *)[command.arguments objectAtIndex:4];
 
-            if (![webViewType isEqual:[NSNull null]]) {
-                if ([webViewType isEqualToString:@"WK_WEB_VIEW"])
-                {
-                    webParameters.webviewType = MSALWebviewTypeWKWebView;
-                }
+            if (![webViewType isEqual:[NSNull null]] && [webViewType isKindOfClass:[NSString class]] && webViewType.length > 0) {
                 if ([webViewType isEqualToString:@"SAFARI_VIEW_CONTROLLER"])
                 {
                     webParameters.webviewType = MSALWebviewTypeSafariViewController;
+                }
+                else if ([webViewType isEqualToString:@"WK_WEB_VIEW"])
+                {
+                    // WKWebView is deprecated for auth on iOS 16+, use default instead
+                    webParameters.webviewType = MSALWebviewTypeDefault;
                 }
             }
 
             MSALInteractiveTokenParameters *interactiveParams = [[MSALInteractiveTokenParameters alloc] initWithScopes:[self scopes] webviewParameters:webParameters];
 
-            if (![loginHint isEqual:[NSNull null]])
+            if (![loginHint isEqual:[NSNull null]] && [loginHint isKindOfClass:[NSString class]] && loginHint.length > 0)
             {
                 interactiveParams.loginHint = loginHint;
             }
 
-            if (![prompt isEqual:[NSNull null]]) {
+            if (![prompt isEqual:[NSNull null]] && [prompt isKindOfClass:[NSString class]]) {
                 if ([prompt isEqualToString:@"SELECT_ACCOUNT"])
                 {
                     interactiveParams.promptType = MSALPromptTypeSelectAccount;
                 }
-                if ([prompt isEqualToString:@"LOGIN"])
+                else if ([prompt isEqualToString:@"LOGIN"])
                 {
                     interactiveParams.promptType = MSALPromptTypeLogin;
                 }
-                if ([prompt isEqualToString:@"CONSENT"])
+                else if ([prompt isEqualToString:@"CONSENT"])
                 {
                     interactiveParams.promptType = MSALPromptTypeConsent;
                 }
             }
 
             NSArray *queryStrings = [command.arguments objectAtIndex:2];
-            NSMutableDictionary *extraQueryParameers = [[NSMutableDictionary alloc] init];
-            for (NSDictionary *queryString in queryStrings)
-            {
-                [extraQueryParameers setObject:[queryString objectForKey:@"value"] forKey:[queryString objectForKey:@"param"]];
+            if ([queryStrings isKindOfClass:[NSArray class]]) {
+                NSMutableDictionary *extraQueryParameters = [[NSMutableDictionary alloc] init];
+                for (NSDictionary *queryString in queryStrings)
+                {
+                    [extraQueryParameters setObject:[queryString objectForKey:@"value"] forKey:[queryString objectForKey:@"param"]];
+                }
+                interactiveParams.extraQueryParameters = [[NSDictionary alloc] initWithDictionary:extraQueryParameters];
             }
-            interactiveParams.extraQueryParameters = [[NSDictionary alloc] initWithDictionary:extraQueryParameers];
-            interactiveParams.extraScopesToConsent = [command.arguments objectAtIndex:3];
+
+            NSArray *extraScopes = [command.arguments objectAtIndex:3];
+            if ([extraScopes isKindOfClass:[NSArray class]]) {
+                interactiveParams.extraScopesToConsent = extraScopes;
+            }
 
             [[self application] acquireTokenWithParameters:interactiveParams completionBlock:^(MSALResult *result, NSError *error) {
                 if (!error)
@@ -367,7 +416,11 @@
                 }
                 else
                 {
-                    CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error.userInfo objectForKey:@"MSALErrorDescriptionKey"]];
+                    NSString *errorMsg = [error.userInfo objectForKey:@"MSALErrorDescriptionKey"];
+                    if (!errorMsg) {
+                        errorMsg = [error localizedDescription];
+                    }
+                    CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:errorMsg];
                     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
                 }
             }];

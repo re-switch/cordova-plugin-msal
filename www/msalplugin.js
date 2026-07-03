@@ -89,11 +89,11 @@ module.exports = {
             signInOptions = {};
         }
         var opts = [
-            typeof(signInOptions.loginHint !== 'undefined') ? signInOptions.loginHint : '',
-            typeof(signInOptions.prompt !== 'undefined') ? signInOptions.prompt : '',
+            typeof(signInOptions.loginHint) !== 'undefined' ? signInOptions.loginHint : null,
+            typeof(signInOptions.prompt) !== 'undefined' ? signInOptions.prompt : null,
             typeof(signInOptions.authorizationQueryStringParameters) !== 'undefined' ? signInOptions.authorizationQueryStringParameters : [],
             typeof(signInOptions.otherScopesToAuthorize) !== 'undefined' ? signInOptions.otherScopesToAuthorize : [],
-            typeof(signInOptions.webViewType) !== 'undefined' ? signInOptions.webViewType : ''
+            typeof(signInOptions.webViewType) !== 'undefined' ? signInOptions.webViewType : null
         ];
         cordova.exec(successCallback, errorCallback, 'MsalPlugin', 'signInInteractive', opts);
     },
