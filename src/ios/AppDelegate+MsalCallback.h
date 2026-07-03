@@ -6,12 +6,15 @@
 //
 
 #import "AppDelegate.h"
+#import <UIKit/UIKit.h>
 
-@interface AppDelegate (MsalCallback)
+@interface AppDelegate (MsalCallback) <UISceneDelegate>
 
 - (BOOL)application:(UIApplication *)app
             openURL:(NSURL *)url
             options:(NSDictionary<UIApplicationOpenURLOptionsKey,id> *)options;
+
+- (void)scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts;
 
 @end
 

@@ -18,4 +18,14 @@
                                          sourceApplication:options[UIApplicationOpenURLOptionsSourceApplicationKey]];
 }
 
+// For scene-based apps on iOS/iPadOS 13+ (required on iPadOS 26+)
+- (void)scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts
+{
+    UIOpenURLContext *context = [URLContexts anyObject];
+    if (context) {
+        [MSALPublicClientApplication handleMSALResponse:context.URL
+                                       sourceApplication:context.options.sourceApplication];
+    }
+}
+
 @end

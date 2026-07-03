@@ -95,15 +95,17 @@
     self.application = [[MSALPublicClientApplication alloc] initWithConfiguration:[self config] error:&msalError];
     self.scopes = [options objectForKey:@"scopes"];
     self.accountMode = [options objectForKey:@"accountMode"];
-    if (msalError)
+    if (msalError || !self.application)
     {
-        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[NSString stringWithFormat:@"Error creating MSAL configuration: %@", [msalError.userInfo objectForKey:@"MSALErrorDescriptionKey"]]];
+        NSString *errorDesc = msalError ? [msalError.userInfo objectForKey:@"MSALErrorDescriptionKey"] : @"Unknown error";
+        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[NSString stringWithFormat:@"Error creating MSAL configuration: %@", errorDesc]];
+        self.isInit = NO;
     }
     else
     {
         result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+        self.isInit = YES;
     }
-    self.isInit = YES;
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
 
@@ -307,9 +309,17 @@
 
     // For iOS/iPadOS 15+ with scenes
     if (@available(iOS 15.0, *)) {
-        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        NSSet<UIScene *> *connectedScenes = UIApplication.sharedApplication.connectedScenes;
+        for (UIScene *scene in connectedScenes) {
             if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
                 UIWindowScene *windowScene = (UIWindowScene *)scene;
+                // Use keyWindow property available on UIWindowScene (iOS 15+)
+                UIWindow *keyWin = windowScene.keyWindow;
+                if (keyWin) {
+                    topController = keyWin.rootViewController;
+                    break;
+                }
+                // Fallback: iterate windows
                 for (UIWindow *window in windowScene.windows) {
                     if (window.isKeyWindow) {
                         topController = window.rootViewController;
@@ -317,6 +327,19 @@
                     }
                 }
                 if (topController) break;
+            }
+        }
+        // If no foreground active scene found, try foreground inactive
+        if (!topController) {
+            for (UIScene *scene in connectedScenes) {
+                if ([scene isKindOfClass:[UIWindowScene class]]) {
+                    UIWindowScene *windowScene = (UIWindowScene *)scene;
+                    UIWindow *keyWin = windowScene.keyWindow;
+                    if (keyWin) {
+                        topController = keyWin.rootViewController;
+                        break;
+                    }
+                }
             }
         }
     }
@@ -342,6 +365,12 @@
     else
     {
         dispatch_async(dispatch_get_main_queue(), ^{
+            if (![self application]) {
+                CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"MSAL application is not initialized. msalInit may have failed."];
+                [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+                return;
+            }
+
             UIViewController *presentingVC = [self topMostViewController];
 
             if (!presentingVC || !presentingVC.view.window) {
