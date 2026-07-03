@@ -310,76 +310,68 @@
     }
     else
     {
-        MSALWebviewParameters *webParameters = [[MSALWebviewParameters alloc] initWithAuthPresentationViewController:[self viewController]];
-        
-        NSError *err = nil;
-        CDVPluginResult *result = nil;
-        
-        NSString *loginHint = (NSString *)[command.arguments objectAtIndex:0];
-        NSString *prompt = (NSString *)[command.arguments objectAtIndex:1];
-        NSString *webViewType = (NSString *)[command.arguments objectAtIndex:4];
-        
-        if (err)
-        {
-            result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[NSString stringWithFormat:@"Error parsing options object: %@", err]];
-            [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
-            return;
-        }
-        
-        if (![webViewType isEqual:[NSNull null]]) {
-            if ([webViewType isEqualToString:@"WK_WEB_VIEW"])
-            {
-                webParameters.webviewType = MSALWebviewTypeWKWebView;
-            }
-            if ([webViewType isEqualToString:@"SAFARI_VIEW_CONTROLLER"])
-            {
-                webParameters.webviewType = MSALWebviewTypeSafariViewController;
-            }
-        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            MSALWebviewParameters *webParameters = [[MSALWebviewParameters alloc] initWithAuthPresentationViewController:[self viewController]];
 
-        MSALInteractiveTokenParameters *interactiveParams = [[MSALInteractiveTokenParameters alloc] initWithScopes:[self scopes] webviewParameters:webParameters];
-        
-        if (![loginHint isEqual:[NSNull null]])
-        {
-            interactiveParams.loginHint = loginHint;
-        }
-        
-        if (![prompt isEqual:[NSNull null]]) {
-            if ([prompt isEqualToString:@"SELECT_ACCOUNT"])
-            {
-                interactiveParams.promptType = MSALPromptTypeSelectAccount;
+            NSString *loginHint = (NSString *)[command.arguments objectAtIndex:0];
+            NSString *prompt = (NSString *)[command.arguments objectAtIndex:1];
+            NSString *webViewType = (NSString *)[command.arguments objectAtIndex:4];
+
+            if (![webViewType isEqual:[NSNull null]]) {
+                if ([webViewType isEqualToString:@"WK_WEB_VIEW"])
+                {
+                    webParameters.webviewType = MSALWebviewTypeWKWebView;
+                }
+                if ([webViewType isEqualToString:@"SAFARI_VIEW_CONTROLLER"])
+                {
+                    webParameters.webviewType = MSALWebviewTypeSafariViewController;
+                }
             }
-            if ([prompt isEqualToString:@"LOGIN"])
+
+            MSALInteractiveTokenParameters *interactiveParams = [[MSALInteractiveTokenParameters alloc] initWithScopes:[self scopes] webviewParameters:webParameters];
+
+            if (![loginHint isEqual:[NSNull null]])
             {
-                interactiveParams.promptType = MSALPromptTypeLogin;
+                interactiveParams.loginHint = loginHint;
             }
-            if ([prompt isEqualToString:@"CONSENT"])
+
+            if (![prompt isEqual:[NSNull null]]) {
+                if ([prompt isEqualToString:@"SELECT_ACCOUNT"])
+                {
+                    interactiveParams.promptType = MSALPromptTypeSelectAccount;
+                }
+                if ([prompt isEqualToString:@"LOGIN"])
+                {
+                    interactiveParams.promptType = MSALPromptTypeLogin;
+                }
+                if ([prompt isEqualToString:@"CONSENT"])
+                {
+                    interactiveParams.promptType = MSALPromptTypeConsent;
+                }
+            }
+
+            NSArray *queryStrings = [command.arguments objectAtIndex:2];
+            NSMutableDictionary *extraQueryParameers = [[NSMutableDictionary alloc] init];
+            for (NSDictionary *queryString in queryStrings)
             {
-                interactiveParams.promptType = MSALPromptTypeConsent;
+                [extraQueryParameers setObject:[queryString objectForKey:@"value"] forKey:[queryString objectForKey:@"param"]];
             }
-        }
-        
-        NSArray *queryStrings = [command.arguments objectAtIndex:2];
-        NSMutableDictionary *extraQueryParameers = [[NSMutableDictionary alloc] init];
-        for (NSDictionary *queryString in queryStrings)
-        {
-            [extraQueryParameers setObject:[queryString objectForKey:@"value"] forKey:[queryString objectForKey:@"param"]];
-        }
-        interactiveParams.extraQueryParameters = [[NSDictionary alloc] initWithDictionary:extraQueryParameers];
-        interactiveParams.extraScopesToConsent = [command.arguments objectAtIndex:3];;
-        
-        [[self application] acquireTokenWithParameters:interactiveParams completionBlock:^(MSALResult *result, NSError *error) {
-            if (!error)
-            {
-                CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[self getAuthResult:result]];
-                [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-            }
-            else
-            {
-                CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error.userInfo objectForKey:@"MSALErrorDescriptionKey"]];
-                [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-            }
-        }];
+            interactiveParams.extraQueryParameters = [[NSDictionary alloc] initWithDictionary:extraQueryParameers];
+            interactiveParams.extraScopesToConsent = [command.arguments objectAtIndex:3];
+
+            [[self application] acquireTokenWithParameters:interactiveParams completionBlock:^(MSALResult *result, NSError *error) {
+                if (!error)
+                {
+                    CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[self getAuthResult:result]];
+                    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+                }
+                else
+                {
+                    CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[error.userInfo objectForKey:@"MSALErrorDescriptionKey"]];
+                    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+                }
+            }];
+        });
     }
 }
 
