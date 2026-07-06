@@ -6,6 +6,15 @@
 
 - (void)msalInit:(CDVInvokedUrlCommand *)command
 {
+    NSLog(@"[MsalPlugin] msalInit called");
+
+    // Enable MSAL internal logging to console so we can debug issues
+    MSALGlobalConfig.loggerConfig.logLevel = MSALLogLevelVerbose;
+    MSALGlobalConfig.loggerConfig.logMaskingLevel = MSALLogMaskingSettingsMaskSecretsOnly;
+    [MSALGlobalConfig.loggerConfig setLogCallback:^(MSALLogLevel level, NSString * _Nullable message, BOOL containsPII) {
+        NSLog(@"[MSAL-INTERNAL] %@", message);
+    }];
+
     NSError *err = nil;
     NSError *msalError = nil;
     CDVPluginResult *result = nil;
@@ -98,11 +107,13 @@
     if (msalError || !self.application)
     {
         NSString *errorDesc = msalError ? [msalError.userInfo objectForKey:@"MSALErrorDescriptionKey"] : @"Unknown error";
+        NSLog(@"[MsalPlugin] msalInit FAILED: %@", errorDesc);
         result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[NSString stringWithFormat:@"Error creating MSAL configuration: %@", errorDesc]];
         self.isInit = NO;
     }
     else
     {
+        NSLog(@"[MsalPlugin] msalInit SUCCESS. clientId=%@, redirectUri=msauth.%@://auth", self.clientId, [[NSBundle mainBundle] bundleIdentifier]);
         result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
         self.isInit = YES;
     }
@@ -357,23 +368,31 @@
 
 - (void)signInInteractive:(CDVInvokedUrlCommand*)command
 {
+    NSLog(@"[MsalPlugin] signInInteractive called. isInit=%d, application=%@", self.isInit, self.application);
+
     if (!self.isInit)
     {
+        NSLog(@"[MsalPlugin] ERROR: Not initialized");
         CDVPluginResult *result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"No configuration has been set yet. Call msalInit() before calling this."];
         [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
     }
     else
     {
         dispatch_async(dispatch_get_main_queue(), ^{
+            NSLog(@"[MsalPlugin] On main thread, about to check application");
+
             if (![self application]) {
+                NSLog(@"[MsalPlugin] ERROR: application is nil");
                 CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"MSAL application is not initialized. msalInit may have failed."];
                 [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
                 return;
             }
 
             UIViewController *presentingVC = [self topMostViewController];
+            NSLog(@"[MsalPlugin] presentingVC=%@, window=%@", presentingVC, presentingVC.view.window);
 
             if (!presentingVC || !presentingVC.view.window) {
+                NSLog(@"[MsalPlugin] ERROR: No valid view controller");
                 CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"No valid view controller available for presentation. The app may not be in the foreground."];
                 [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
                 return;
@@ -383,10 +402,16 @@
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 130000
             webParameters.prefersEphemeralWebBrowserSession = NO;
 #endif
+            // Default to SafariViewController which is more reliable on iPadOS 26
+            // than ASWebAuthenticationSession (which is the MSALWebviewTypeDefault)
+            webParameters.webviewType = MSALWebviewTypeSafariViewController;
+            NSLog(@"[MsalPlugin] Default webviewType set to SafariViewController");
 
             NSString *loginHint = (NSString *)[command.arguments objectAtIndex:0];
             NSString *prompt = (NSString *)[command.arguments objectAtIndex:1];
             NSString *webViewType = (NSString *)[command.arguments objectAtIndex:4];
+
+            NSLog(@"[MsalPlugin] Args: loginHint=%@, prompt=%@, webViewType=%@", loginHint, prompt, webViewType);
 
             if (![webViewType isEqual:[NSNull null]] && [webViewType isKindOfClass:[NSString class]] && webViewType.length > 0) {
                 if ([webViewType isEqualToString:@"SAFARI_VIEW_CONTROLLER"])
@@ -401,6 +426,7 @@
             }
 
             MSALInteractiveTokenParameters *interactiveParams = [[MSALInteractiveTokenParameters alloc] initWithScopes:[self scopes] webviewParameters:webParameters];
+            NSLog(@"[MsalPlugin] scopes=%@", [self scopes]);
 
             if (![loginHint isEqual:[NSNull null]] && [loginHint isKindOfClass:[NSString class]] && loginHint.length > 0)
             {
@@ -437,7 +463,10 @@
                 interactiveParams.extraScopesToConsent = extraScopes;
             }
 
+            NSLog(@"[MsalPlugin] About to call acquireTokenWithParameters");
+
             [[self application] acquireTokenWithParameters:interactiveParams completionBlock:^(MSALResult *result, NSError *error) {
+                NSLog(@"[MsalPlugin] acquireToken completion: result=%@, error=%@", result, error);
                 if (!error)
                 {
                     CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:[self getAuthResult:result]];
@@ -453,6 +482,8 @@
                     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
                 }
             }];
+
+            NSLog(@"[MsalPlugin] acquireTokenWithParameters returned (async call in progress)");
         });
     }
 }

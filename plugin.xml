@@ -89,7 +89,7 @@
                 <source url="https://cdn.cocoapods.org/"/>
             </config>
             <pods use_frameworks="true">
-                <pod name="MSAL" />
+                <pod name="MSAL" spec="~> 1.7" />
             </pods>
         </podspec>
         <config-file target="*-Info.plist" parent="CFBundleURLTypes">
