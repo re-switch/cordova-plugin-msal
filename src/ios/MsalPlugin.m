@@ -120,26 +120,102 @@
     [self.commandDelegate sendPluginResult:result callbackId:command.callbackId];
 }
 
+// Convert any claim value into a JSON-serializable form for Cordova plugin result.
+- (id)jsonSafeValue:(id)value
+{
+    if (!value || value == [NSNull null]) {
+        return [NSNull null];
+    }
+    if ([value isKindOfClass:[NSString class]] ||
+        [value isKindOfClass:[NSNumber class]]) {
+        return value;
+    }
+    if ([value isKindOfClass:[NSArray class]]) {
+        NSMutableArray *arr = [NSMutableArray arrayWithCapacity:[(NSArray *)value count]];
+        for (id item in (NSArray *)value) {
+            [arr addObject:[self jsonSafeValue:item]];
+        }
+        return arr;
+    }
+    if ([value isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *dict = [NSMutableDictionary new];
+        for (id k in (NSDictionary *)value) {
+            [dict setObject:[self jsonSafeValue:[(NSDictionary *)value objectForKey:k]]
+                     forKey:[NSString stringWithFormat:@"%@", k]];
+        }
+        return dict;
+    }
+    if ([value isKindOfClass:[NSDate class]]) {
+        return @([(NSDate *)value timeIntervalSince1970]);
+    }
+    // Fallback: stringify
+    return [NSString stringWithFormat:@"%@", value];
+}
+
+- (NSArray<NSDictionary *> *)claimsArrayFromDictionary:(NSDictionary *)claimsDict
+{
+    NSMutableArray<NSDictionary *> *claims = [[NSMutableArray alloc] init];
+    for (id key in claimsDict) {
+        id rawValue = [claimsDict objectForKey:key];
+        [claims addObject:@{
+            @"key"   : [NSString stringWithFormat:@"%@", key],
+            @"value" : [self jsonSafeValue:rawValue]
+        }];
+    }
+    return claims;
+}
+
 - (NSDictionary *)getAccountObject:(MSALAccount *)account
+{
+    return [self getAccountObject:account withClaimsOverride:nil];
+}
+
+- (NSDictionary *)getAccountObject:(MSALAccount *)account withClaimsOverride:(NSDictionary *)claimsOverride
 {
     NSMutableDictionary *acct = [[NSMutableDictionary alloc] initWithCapacity:3];
     [acct setValue:[account identifier] forKey:@"id"];
     [acct setValue:[account username] forKey:@"username"];
-    NSMutableArray<NSDictionary *> *claims = [[NSMutableArray alloc] init];
-    for (id key in [account accountClaims])
-    {
-        [claims addObject:@{@"key" : key, @"value" : [[account accountClaims] objectForKey:key]}];
+
+    // Prefer explicit claims (from MSALResult.tenantProfile), fall back to account.accountClaims,
+    // then to the home tenant profile claims.
+    NSDictionary *claimsDict = claimsOverride;
+    if (claimsDict.count == 0) {
+        claimsDict = [account accountClaims];
     }
-    [acct setValue:[[NSArray<NSDictionary *> alloc] initWithArray:claims] forKey:@"claims"];
+    if (claimsDict.count == 0) {
+        for (MSALTenantProfile *tp in [account tenantProfiles]) {
+            if (tp.claims.count > 0) {
+                claimsDict = tp.claims;
+                if (tp.isHomeTenantProfile) break;
+            }
+        }
+    }
+
+    [acct setValue:[self claimsArrayFromDictionary:claimsDict] forKey:@"claims"];
     return [[NSDictionary alloc] initWithDictionary:acct];
 }
 
 - (NSDictionary *)getAuthResult:(MSALResult *)result
 {
-    NSMutableDictionary *obj = [[NSMutableDictionary alloc] initWithCapacity:2];
+    NSMutableDictionary *obj = [[NSMutableDictionary alloc] initWithCapacity:5];
     [obj setValue:result.accessToken forKey:@"token"];
-    [obj setValue:[self getAccountObject:result.account] forKey:@"account"];
     [obj setValue:result.idToken forKey:@"idToken"];
+
+    // MSALResult.tenantProfile.claims contains the ID token claims for the tenant
+    // the token was acquired for. This is the most reliable source of claims.
+    NSDictionary *tenantClaims = result.tenantProfile.claims;
+    [obj setValue:[self getAccountObject:result.account withClaimsOverride:tenantClaims]
+           forKey:@"account"];
+
+    // Expose the raw ID token claims separately as well, for convenience.
+    [obj setValue:[self claimsArrayFromDictionary:tenantClaims] forKey:@"idTokenClaims"];
+
+    if (result.expiresOn) {
+        [obj setValue:@([result.expiresOn timeIntervalSince1970]) forKey:@"expiresOn"];
+    }
+    if (result.scopes) {
+        [obj setValue:result.scopes forKey:@"scopes"];
+    }
     return [[NSDictionary alloc] initWithDictionary:obj];
 }
 
